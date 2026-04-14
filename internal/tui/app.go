@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/boomyao/clash-cli/internal/api"
@@ -70,8 +71,9 @@ type AppModel struct {
 	coreRunning    bool
 	coreVersion    string
 	sysProxyOn     bool
-	backgroundMode  bool // if true, cleanup() leaves auto-launched mihomo running
-	updateAvailable string // tag name of newer release, or "" if none
+	backgroundMode    bool   // if true, cleanup() leaves auto-launched mihomo running
+	updateAvailable   string // tag name of newer release, or "" if none
+	tunRequestPending bool   // true if user just asked to enable TUN; cleared on next refresh
 
 	initialized bool
 }
@@ -248,6 +250,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.broadcast(pages.NewModeMsg(msg.cfg.Mode), &cmds)
 			m.broadcast(pages.NewTunStatusMsg(msg.cfg.Tun.Enable), &cmds)
 			m.broadcast(pages.NewAllowLanMsg(msg.cfg.AllowLan), &cmds)
+
+			// If the user just asked for TUN ON but mihomo failed to bring it
+			// up (most commonly: missing CAP_NET_ADMIN), surface the reason.
+			if m.tunRequestPending && !msg.cfg.Tun.Enable {
+				cmds = append(cmds, m.toast.Show(
+					"TUN failed — mihomo needs CAP_NET_ADMIN. Run: sudo setcap 'cap_net_admin,cap_net_bind_service=+ep' "+m.appConfig.Core.BinaryPath,
+					components.ToastError,
+				))
+			}
+			m.tunRequestPending = false
 		}
 		return m, tea.Batch(cmds...)
 
@@ -315,7 +327,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case pages.SettingsUpdatedMsg:
-		// When user toggles a setting, refresh state from server
+		// When user toggles a setting, refresh state from server.
+		// For TUN ON: arm the failure detector so we can warn if the
+		// PATCH was accepted but the tun device couldn't be brought up.
+		if strings.Contains(msg.Setting, "TUN Mode → ON") {
+			m.tunRequestPending = true
+		}
 		if msg.Err == nil {
 			cmds = append(cmds, m.toast.Show(msg.Setting, components.ToastSuccess))
 			client := m.apiClient

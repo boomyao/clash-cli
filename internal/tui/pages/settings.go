@@ -182,16 +182,24 @@ func (s *SettingsPage) executeAction() tea.Cmd {
 		}
 
 	case "tun":
+		// Don't optimistically flip — mihomo may accept the PATCH but fail to
+		// actually create the TUN device (e.g. missing CAP_NET_ADMIN). The
+		// configRefreshedMsg broadcast after SettingsUpdatedMsg will set the
+		// real state from /configs.
 		newVal := !s.tunEnabled
-		s.tunEnabled = newVal
 		return func() tea.Msg {
 			err := client.SetTunEnabled(newVal)
-			return SettingsUpdatedMsg{Setting: "TUN Mode", Err: err}
+			label := "TUN Mode"
+			if newVal {
+				label = "TUN Mode → ON (verifying...)"
+			} else {
+				label = "TUN Mode → OFF"
+			}
+			return SettingsUpdatedMsg{Setting: label, Err: err}
 		}
 
 	case "allowlan":
 		newVal := !s.allowLan
-		s.allowLan = newVal
 		return func() tea.Msg {
 			err := client.SetAllowLan(newVal)
 			return SettingsUpdatedMsg{Setting: "Allow LAN", Err: err}

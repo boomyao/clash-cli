@@ -182,11 +182,17 @@ type sysProxyMsg struct{ enabled bool }
 type tunStatusMsg struct{ enabled bool }
 type allowLanMsg struct{ enabled bool }
 type connectionsCountMsg struct{ count int }
+type backgroundModeMsg struct{ enabled bool }
 
 // SysProxyChangedMsg is emitted by the root app when the user toggles
 // the system proxy with the global `s` shortcut. It is exported so the
 // root model's Update can match on it (the root lives in a different package).
 type SysProxyChangedMsg struct{ Enabled bool }
+
+// BackgroundModeToggleMsg is emitted by the Settings page when the user toggles
+// "Keep mihomo running on exit". The root app captures it and updates state,
+// then re-broadcasts as backgroundModeMsg so all pages can show indicators.
+type BackgroundModeToggleMsg struct{}
 
 // Constructors used by app.go to push state updates into pages.
 func NewTrafficMsg(up, down int64) tea.Msg              { return trafficMsg{up, down} }
@@ -197,3 +203,4 @@ func NewSysProxyMsg(enabled bool) tea.Msg               { return sysProxyMsg{ena
 func NewTunStatusMsg(enabled bool) tea.Msg              { return tunStatusMsg{enabled} }
 func NewAllowLanMsg(enabled bool) tea.Msg               { return allowLanMsg{enabled} }
 func NewConnectionsCountMsg(count int) tea.Msg          { return connectionsCountMsg{count} }
+func NewBackgroundModeMsg(enabled bool) tea.Msg         { return backgroundModeMsg{enabled} }

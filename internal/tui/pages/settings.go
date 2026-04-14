@@ -62,9 +62,10 @@ type SettingsPage struct {
 	mixedPort  int
 	logLevel   string
 
-	coreRunning bool
-	coreVersion string
-	sysProxyOn  bool
+	coreRunning    bool
+	coreVersion    string
+	sysProxyOn     bool
+	backgroundMode bool // keep mihomo running on exit
 
 	items []settingItem
 
@@ -87,6 +88,7 @@ func NewSettingsPage() *SettingsPage {
 			{label: "System Proxy", action: "sysproxy"},
 			{label: "TUN Mode", action: "tun"},
 			{label: "Allow LAN", action: "allowlan"},
+			{label: "Keep mihomo on exit", action: "background"},
 			{label: "Restart Core", action: "restart"},
 			{label: "Flush DNS Cache", action: "flushdns"},
 			{label: "Flush FakeIP Cache", action: "flushfakeip"},
@@ -124,6 +126,9 @@ func (s *SettingsPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case allowLanMsg:
 		s.allowLan = msg.enabled
+
+	case backgroundModeMsg:
+		s.backgroundMode = msg.enabled
 
 	case SettingsUpdatedMsg:
 		if msg.Err != nil {
@@ -190,6 +195,13 @@ func (s *SettingsPage) executeAction() tea.Cmd {
 		return func() tea.Msg {
 			err := client.SetAllowLan(newVal)
 			return SettingsUpdatedMsg{Setting: "Allow LAN", Err: err}
+		}
+
+	case "background":
+		// This is purely client-side state. The root model owns the actual
+		// flag; we just emit a toggle event for it to handle.
+		return func() tea.Msg {
+			return BackgroundModeToggleMsg{}
 		}
 
 	case "restart":
@@ -293,6 +305,13 @@ func (s *SettingsPage) getSettingValue(action string) string {
 	case "allowlan":
 		if s.allowLan {
 			return settingOnStyle.Render("ON")
+		}
+		return settingOffStyle.Render("OFF")
+	case "background":
+		if s.backgroundMode {
+			return settingOnStyle.Render("ON") + "  " +
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).
+					Render("(mihomo will keep running after q)")
 		}
 		return settingOffStyle.Render("OFF")
 	case "restart":

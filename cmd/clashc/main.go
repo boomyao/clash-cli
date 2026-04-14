@@ -97,11 +97,16 @@ func main() {
 	}
 
 	// Cleanup-on-exit: if we launched mihomo, make sure it dies with us
-	// no matter how we leave (TUI crash, panic, signal).
+	// — UNLESS the user toggled "background mode" inside the TUI, in which
+	// case we leave it running so it survives clashc exit.
 	exitCode := 0
+	keepMihomo := false
 	defer func() {
-		if res.Manager != nil && res.Manager.IsRunning() {
+		if res.Manager != nil && res.Manager.IsRunning() && !keepMihomo {
 			_ = res.Manager.Stop()
+		}
+		if keepMihomo && res.Manager != nil {
+			fmt.Fprintln(os.Stderr, "✓ mihomo left running in background (PID ownership released)")
 		}
 		os.Exit(exitCode)
 	}()
@@ -117,9 +122,13 @@ func main() {
 		p.Quit()
 	}()
 
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ run TUI: %v\n", err)
 		exitCode = 1
+	}
+	if fm, ok := finalModel.(tui.AppModel); ok {
+		keepMihomo = fm.BackgroundMode()
 	}
 }
 

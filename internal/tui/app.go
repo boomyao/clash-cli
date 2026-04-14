@@ -51,16 +51,17 @@ type AppModel struct {
 	width, height int
 
 	// Shared state
-	trafficUp   int64
-	trafficDown int64
-	memoryInUse int64
-	mode        string
-	mixedPort   int // from GET /configs
-	httpPort    int
-	socksPort   int
-	coreRunning bool
-	coreVersion string
-	sysProxyOn  bool
+	trafficUp      int64
+	trafficDown    int64
+	memoryInUse    int64
+	mode           string
+	mixedPort      int // from GET /configs
+	httpPort       int
+	socksPort      int
+	coreRunning    bool
+	coreVersion    string
+	sysProxyOn     bool
+	backgroundMode bool // if true, cleanup() leaves auto-launched mihomo running
 
 	initialized bool
 }
@@ -297,6 +298,26 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Broadcast sysproxy change to all pages and update root state
 		m.sysProxyOn = msg.Enabled
 		m.broadcast(pages.NewSysProxyMsg(msg.Enabled), &cmds)
+		return m, tea.Batch(cmds...)
+
+	case pages.BackgroundModeToggleMsg:
+		// User asked to toggle "keep mihomo on exit"
+		if m.coreMgr == nil {
+			cmds = append(cmds, m.toast.Show(
+				"Background mode requires mihomo to be auto-launched by clashc",
+				components.ToastWarning,
+			))
+			return m, tea.Batch(cmds...)
+		}
+		m.backgroundMode = !m.backgroundMode
+		label := "Background mode OFF — mihomo will stop with clashc"
+		kind := components.ToastInfo
+		if m.backgroundMode {
+			label = "Background mode ON — mihomo will keep running after q"
+			kind = components.ToastSuccess
+		}
+		cmds = append(cmds, m.toast.Show(label, kind))
+		m.broadcast(pages.NewBackgroundModeMsg(m.backgroundMode), &cmds)
 		return m, tea.Batch(cmds...)
 
 	case pages.ProfileActionMsg:
@@ -545,10 +566,17 @@ func (m *AppModel) cleanup() {
 		_ = m.sysProxy.Disable()
 	}
 
-	// Stop mihomo if we launched it
-	if m.coreMgr != nil && m.coreMgr.IsRunning() {
+	// Stop mihomo if we launched it — UNLESS the user enabled background mode,
+	// in which case we leave it running and orphaned (init/systemd takes over).
+	if m.coreMgr != nil && m.coreMgr.IsRunning() && !m.backgroundMode {
 		_ = m.coreMgr.Stop()
 	}
+}
+
+// BackgroundMode reports whether mihomo should be kept running on exit.
+// main.go reads this after the TUI has quit so its defer cleanup matches.
+func (m *AppModel) BackgroundMode() bool {
+	return m.backgroundMode
 }
 
 func (m AppModel) View() string {
@@ -568,6 +596,7 @@ func (m AppModel) View() string {
 	m.statusBar.MemoryMB = float64(m.memoryInUse) / 1024 / 1024
 	m.statusBar.SysProxyOn = m.sysProxyOn
 	m.statusBar.CoreRunning = m.coreRunning
+	m.statusBar.BackgroundMode = m.backgroundMode
 	statusView := m.statusBar.View()
 
 	// Page content

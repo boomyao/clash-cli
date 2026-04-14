@@ -1,0 +1,20 @@
+# Build artifacts (root-only — don't shadow cmd/clashc/)
+/clashc
+/mihomo-cli
+/dist/
+*.exe
+*.test
+*.out
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Backups
+*.bak
+*.tmp
+
+# Local data (should never be committed)
+*.log

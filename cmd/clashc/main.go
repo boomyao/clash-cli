@@ -10,6 +10,7 @@ import (
 	"github.com/boomyao/clash-cli/internal/bootstrap"
 	"github.com/boomyao/clash-cli/internal/config"
 	"github.com/boomyao/clash-cli/internal/tui"
+	"github.com/boomyao/clash-cli/internal/updater"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -32,19 +33,32 @@ func main() {
 		fmt.Fprintf(out, "Usage:\n")
 		fmt.Fprintf(out, "  clashc                  Connect to mihomo (auto-start if not running)\n")
 		fmt.Fprintf(out, "  clashc <subscription>   Import subscription URL, then start TUI\n")
+		fmt.Fprintf(out, "  clashc update           Download and install the latest release\n")
 		fmt.Fprintf(out, "\nFlags:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(out, "\nExamples:\n")
 		fmt.Fprintf(out, "  clashc\n")
-		fmt.Fprintf(out, "  clashc https://example.com/sub.yaml\n")
+		fmt.Fprintf(out, "  clashc 'https://example.com/sub.yaml'\n")
+		fmt.Fprintf(out, "  clashc update\n")
 		fmt.Fprintf(out, "  clashc --api-url 127.0.0.1:9090 --secret xxx\n")
 	}
 	flag.Parse()
+
+	// 'update' subcommand: short-circuit before doing anything else
+	if args := flag.Args(); len(args) > 0 && args[0] == "update" {
+		if _, err := updater.Run(version, os.Stderr); err != nil {
+			fail("update: %v", err)
+		}
+		os.Exit(0)
+	}
 
 	if *showVersion {
 		fmt.Printf("clashc %s\n", version)
 		os.Exit(0)
 	}
+
+	// Tell the TUI which version we are so the update-check can compare.
+	tui.SetVersion(version)
 
 	if err := config.EnsureDirs(); err != nil {
 		fail("create directories: %v", err)

@@ -38,15 +38,16 @@ var (
 
 // StatusBar shows system status at the bottom of the TUI.
 type StatusBar struct {
-	Profile        string
-	Mode           string
-	TrafficUp      int64
-	TrafficDown    int64
-	MemoryMB       float64
-	SysProxyOn     bool
-	CoreRunning    bool
-	BackgroundMode bool
-	Width          int
+	Profile         string
+	Mode            string
+	TrafficUp       int64
+	TrafficDown     int64
+	MemoryMB        float64
+	SysProxyOn      bool
+	CoreRunning     bool
+	BackgroundMode  bool
+	UpdateAvailable string // tag name of newer release, empty if up to date
+	Width           int
 }
 
 // NewStatusBar creates a new StatusBar with defaults.
@@ -100,6 +101,15 @@ func (s StatusBar) View() string {
 			Bold(true).
 			Render("⏚ BG")
 		parts = append(parts, bg)
+	}
+
+	// Update-available indicator
+	if s.UpdateAvailable != "" {
+		up := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#06B6D4")).
+			Bold(true).
+			Render("↑ " + s.UpdateAvailable)
+		parts = append(parts, up)
 	}
 
 	content := ""

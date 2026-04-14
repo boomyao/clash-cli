@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/boomyao/clash-cli/internal/api"
 	"github.com/boomyao/clash-cli/internal/config"
@@ -10,12 +11,20 @@ import (
 	"github.com/boomyao/clash-cli/internal/sysproxy"
 	"github.com/boomyao/clash-cli/internal/tui/components"
 	"github.com/boomyao/clash-cli/internal/tui/pages"
+	"github.com/boomyao/clash-cli/internal/updater"
 	"github.com/boomyao/clash-cli/internal/ws"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// CurrentVersion is set from main.go via SetVersion so the updater can
+// compare against the version baked in at build time.
+var currentVersion = "dev"
+
+// SetVersion records the running build's version for update checks.
+func SetVersion(v string) { currentVersion = v }
 
 // Tab indices
 const (
@@ -61,7 +70,8 @@ type AppModel struct {
 	coreRunning    bool
 	coreVersion    string
 	sysProxyOn     bool
-	backgroundMode bool // if true, cleanup() leaves auto-launched mihomo running
+	backgroundMode  bool // if true, cleanup() leaves auto-launched mihomo running
+	updateAvailable string // tag name of newer release, or "" if none
 
 	initialized bool
 }
@@ -145,6 +155,26 @@ type configRefreshedMsg struct {
 	cfg *api.ConfigResponse
 }
 
+// updateCheckMsg carries the result of a background GitHub release check.
+type updateCheckMsg struct {
+	latest string // empty if no update or check failed
+}
+
+// checkForUpdate returns a tea.Cmd that asks GitHub for the latest release
+// and produces an updateCheckMsg. Failures are silent (latest = "").
+func checkForUpdate() tea.Cmd {
+	return func() tea.Msg {
+		rel, err := updater.LatestRelease(5 * time.Second)
+		if err != nil || rel == nil {
+			return updateCheckMsg{}
+		}
+		if updater.IsNewer(currentVersion, rel.TagName) {
+			return updateCheckMsg{latest: rel.TagName}
+		}
+		return updateCheckMsg{}
+	}
+}
+
 func (m AppModel) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	for _, p := range m.pages {
@@ -160,6 +190,9 @@ func (m AppModel) Init() tea.Cmd {
 		cfg, _ := client.GetConfig()
 		return initMsg{version: ver, config: cfg}
 	})
+
+	// Background: check GitHub for a newer clashc release
+	cmds = append(cmds, checkForUpdate())
 
 	return tea.Batch(cmds...)
 }
@@ -197,6 +230,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, pages.LoadProxies(client))
 		cmds = append(cmds, pages.LoadRules(client))
 
+		return m, tea.Batch(cmds...)
+
+	case updateCheckMsg:
+		if msg.latest != "" {
+			m.updateAvailable = msg.latest
+			cmds = append(cmds, m.toast.Show(
+				fmt.Sprintf("Update available: %s — run 'clashc update'", msg.latest),
+				components.ToastInfo,
+			))
+		}
 		return m, tea.Batch(cmds...)
 
 	case configRefreshedMsg:
@@ -597,6 +640,7 @@ func (m AppModel) View() string {
 	m.statusBar.SysProxyOn = m.sysProxyOn
 	m.statusBar.CoreRunning = m.coreRunning
 	m.statusBar.BackgroundMode = m.backgroundMode
+	m.statusBar.UpdateAvailable = m.updateAvailable
 	statusView := m.statusBar.View()
 
 	// Page content

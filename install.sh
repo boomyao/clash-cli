@@ -117,15 +117,19 @@ install_clashc() {
 }
 
 # ---------- install mihomo if missing ----------
+# Echoes the absolute path of the mihomo binary on stdout so the caller
+# can act on it (e.g. grant capabilities).
 install_mihomo_if_missing() {
   os="$1"; arch="$2"; dest_dir="$3"
 
   if command -v mihomo >/dev/null 2>&1; then
-    ok "mihomo already installed: $(command -v mihomo)"
+    existing="$(command -v mihomo)"
+    ok "mihomo already installed: $existing" >&2
+    echo "$existing"
     return 0
   fi
 
-  info "mihomo not found — installing latest from MetaCubeX..."
+  info "mihomo not found — installing latest from MetaCubeX..." >&2
   version="$(latest_tag "$MIHOMO_REPO")" || die "failed to query mihomo release"
   [ -z "$version" ] && die "no mihomo releases found"
 
@@ -137,19 +141,70 @@ install_mihomo_if_missing() {
   out="$dest_dir/mihomo"
   mkdir -p "$dest_dir"
 
-  info "Downloading $archive..."
+  info "Downloading $archive..." >&2
   if curl -fsSL -o "$tmpdir/mihomo.gz" "$url"; then
     gunzip -c "$tmpdir/mihomo.gz" > "$out"
     chmod +x "$out"
-    ok "Installed mihomo $version → $out"
-  else
+    ok "Installed mihomo $version → $out" >&2
     rm -rf "$tmpdir"
-    warn "Could not download mihomo automatically (URL: $url)"
-    warn "Please install mihomo manually from https://github.com/$MIHOMO_REPO/releases"
+    echo "$out"
     return 0
   fi
 
   rm -rf "$tmpdir"
+  warn "Could not download mihomo automatically (URL: $url)" >&2
+  warn "Please install mihomo manually from https://github.com/$MIHOMO_REPO/releases" >&2
+  return 0
+}
+
+# ---------- grant CAP_NET_ADMIN to mihomo so TUN mode works without root ----------
+grant_mihomo_caps() {
+  os="$1"; mihomo_path="$2"
+
+  # Only meaningful on Linux. macOS TUN setup is a separate beast that
+  # involves codesigning / system extensions; we don't touch it here.
+  [ "$os" = "linux" ] || return 0
+  [ -n "$mihomo_path" ] && [ -x "$mihomo_path" ] || return 0
+
+  if ! command -v setcap >/dev/null 2>&1; then
+    warn "'setcap' not found (install libcap2-bin) — TUN mode will need 'sudo clashc' or systemd"
+    return 0
+  fi
+
+  # Already granted? Nothing to do.
+  current="$(getcap "$mihomo_path" 2>/dev/null || true)"
+  case "$current" in
+    *cap_net_admin*) ok "mihomo already has cap_net_admin"; return 0 ;;
+  esac
+
+  info "Granting CAP_NET_ADMIN to $mihomo_path so TUN mode works without root..."
+
+  # Already root? Just run setcap directly.
+  if [ "$(id -u)" = "0" ]; then
+    if setcap 'cap_net_admin,cap_net_bind_service=+ep' "$mihomo_path" 2>/dev/null; then
+      ok "Granted CAP_NET_ADMIN"
+      return 0
+    fi
+    warn "setcap failed; TUN mode will not work without 'sudo clashc'"
+    return 0
+  fi
+
+  # Non-root: try sudo. Prompt explicitly so the user knows why their password is requested.
+  if command -v sudo >/dev/null 2>&1; then
+    echo "  → running: sudo setcap 'cap_net_admin,cap_net_bind_service=+ep' $mihomo_path"
+    echo "  (you may be prompted for your password)"
+    if sudo setcap 'cap_net_admin,cap_net_bind_service=+ep' "$mihomo_path"; then
+      ok "Granted CAP_NET_ADMIN"
+      return 0
+    fi
+    warn "sudo setcap failed or was declined."
+    warn "TUN mode requires CAP_NET_ADMIN. To fix later, run:"
+    warn "  sudo setcap 'cap_net_admin,cap_net_bind_service=+ep' $mihomo_path"
+    return 0
+  fi
+
+  warn "sudo not available — please run as root:"
+  warn "  setcap 'cap_net_admin,cap_net_bind_service=+ep' $mihomo_path"
 }
 
 # ---------- ensure dest_dir is on PATH ----------
@@ -196,12 +251,14 @@ main() {
   echo
 
   install_clashc "$os" "$arch" "$dest_dir" "$version"
-  install_mihomo_if_missing "$os" "$arch" "$dest_dir"
+  mihomo_path="$(install_mihomo_if_missing "$os" "$arch" "$dest_dir")"
+  echo
+  grant_mihomo_caps "$os" "$mihomo_path"
   echo
   ensure_path "$dest_dir"
   echo
   ok "Done! Run: clashc"
-  echo "  First run? Try: clashc <your-subscription-url>"
+  echo "  First run? Try: clashc 'https://your-subscription-url'"
 }
 
 main "$@"
